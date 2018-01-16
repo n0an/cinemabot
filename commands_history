@@ -2,3 +2,13 @@ npm init
 npm i node-telegram-bot-api --save
 npm i nodemon --save-dev
 npm run dev
+npm i --save mongoose
+npm install geolib lodash --save
+
+
+//--------
+// MongoDB database:
+show databases
+use wfmcinema
+show collections
+db.films.find()

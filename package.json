@@ -10,6 +10,9 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "geolib": "^2.0.24",
+    "lodash": "^4.17.4",
+    "mongoose": "^4.13.9",
     "node-telegram-bot-api": "^0.30.0"
   },
   "devDependencies": {
