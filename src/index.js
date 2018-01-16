@@ -10,6 +10,7 @@ const database = require('../database.json')
 
 helper.logStart()
 
+mongoose.Promise = global.Promise
 mongoose.connect(config.DB_URL, {
   useMongoClient: true
 })
@@ -58,6 +59,9 @@ bot.on('message', msg => {
 
   switch (msg.text) {
     case kb.home.favourite:
+      console.log('chatId = ', chatId)
+      console.log('msg.from.id = ', msg.from.id)
+      showFavouriteFilms(chatId, msg.from.id)
       break
     case kb.home.films:
       bot.sendMessage(chatId, `Выберите жанр:`, {
@@ -95,8 +99,10 @@ bot.on('message', msg => {
 
 bot.on('callback_query', query => {
 
+  const userId = query.from.id
+
   console.log(query.data)
-  
+
   let data
   try {
     data = JSON.parse(query.data)
@@ -107,14 +113,45 @@ bot.on('callback_query', query => {
   const { type } = data
 
   if (type === ACTION_TYPE.SHOW_CINEMAS_MAP) {
-
+    const {lat, lon} = data
+    bot.sendLocation(query.message.chat.id, lat, lon)
   } else if (type === ACTION_TYPE.SHOW_CINEMAS) {
-
+    sendCinemasByQuery(userId, {uuid: {'$in': data.cinemaUuids}})
   } else if (type === ACTION_TYPE.TOGGLE_FAV_FILM) {
-
+    toggleFavouriteFilm(userId, query.id, data)
   } else if (type === ACTION_TYPE.SHOW_FILMS) {
-
+    sendFilmsByQuery(userId, {uuid: {'$in': data.filmUuids}})
   }
+})
+
+
+bot.on('inline_query', query => {
+  Film.find({}).then(films => {
+    const results = films.map(f => {
+      const caption = `Название: ${f.name}\nГод: ${f.year}\nРейтинг: ${f.rate}\nДлительность: ${f.length}\nСтрана: ${f.country}`
+      return {
+        id: f.uuid,
+        type: 'photo',
+        photo_url: f.picture,
+        thumb_url: f.picture,
+        caption: caption,
+        reply_markup: {
+          inline_keyboard: [
+            [
+              {
+                text: `Кинопоиск: ${f.name}`,
+                url: f.link
+              }
+            ]
+          ]
+        }
+      }
+    })
+
+    bot.answerInlineQuery(query.id, results, {
+      cache_time: 0
+    })
+  })
 })
 
 
@@ -133,13 +170,26 @@ bot.onText(/\/start/, msg => {
 
 })
 
+// -- Films inline section
 bot.onText(/\/f(.+)/, (msg, [source, match]) => {
   const filmUuid = helper.getItemUuid(source)
   const chatId = helper.getChatId(msg)
 
-  Film.findOne({uuid: filmUuid}).then(film => {
+  Promise.all([
+    Film.findOne({uuid: filmUuid}),
+    User.findOne({telegramId: msg.from.id})
+  ])
+  .then(([film, user]) => {
 
     // console.log(film)
+
+    let isFav = false
+
+    if (user) {
+      isFav = user.films.indexOf(film.uuid) !== -1
+    }
+
+    const favText = isFav ? 'Удалить из Избранного' : 'Добавить в Избранное'
 
     const caption = `Название: ${film.name}\nГод: ${film.year}\nРейтинг: ${film.rate}\nДлительность: ${film.length}\nСтрана: ${film.country}`
 
@@ -149,10 +199,11 @@ bot.onText(/\/f(.+)/, (msg, [source, match]) => {
         inline_keyboard: [
           [
             {
-              text: 'Добавить в избранное',
+              text: favText,
               callback_data: JSON.stringify({
                 type: ACTION_TYPE.TOGGLE_FAV_FILM,
-                filmUuid: film.uuid
+                filmUuid: film.uuid,
+                isFav: isFav
               })
             },
             {
@@ -176,6 +227,7 @@ bot.onText(/\/f(.+)/, (msg, [source, match]) => {
   })
 })
 
+// -- Cinemas inline section
 bot.onText(/\/c(.+)/, (msg, [source, match]) => {
   const cinemaUuid = helper.getItemUuid(source)
   const chatId = helper.getChatId(msg)
@@ -231,7 +283,6 @@ function sendFilmsByQuery(chatId, query) {
   })
 }
 
-
 function sendHTML(chatId, html, kbName = null) {
   const options = {
     parse_mode: 'HTML'
@@ -262,6 +313,76 @@ function getCinemasInCoord(chatId, location) {
     }).join('\n')
 
     sendHTML(chatId, html, 'home')
+  })
+}
+
+function toggleFavouriteFilm(userId, queryId, {filmUuid, isFav}) {
+
+  let userPromise
+
+  User.findOne({telegramId: userId})
+    .then(user => {
+      if (user) {
+        if (isFav) {
+          user.films = user.films.filter(fUuid => fUuid !== filmUuid)
+        } else {
+          user.films.push(filmUuid)
+        }
+        userPromise = user
+      } else {
+        userPromise = new User({
+          telegramId: userId,
+          films: [filmUuid]
+        })
+      }
+
+      const answerText = isFav ? 'Удалено' : 'Добавлено'
+
+      userPromise.save().then(_ => {
+        bot.answerCallbackQuery({
+          callback_query_id: queryId,
+          text: answerText
+        })
+      }).catch(err => console.log(err))
+    }).catch(err => console.log(err))
+}
+
+
+function showFavouriteFilms(chatId, telegramId) {
+  console.log(telegramId)
+  console.log('chatid = ', chatId)
+
+  User.findOne({telegramId})
+    .then(user => {
+      if (user) {
+        Film.find({uuid: {'$in': user.films}}).then(films => {
+          let html
+
+          if (films.length) {
+            html = films.map((f, i) => {
+              return `<b>${i + 1}</b> ${f.name} - <b>${f.rate}</b> (/f${f.uuid})`
+            }).join('\n')
+          } else {
+            html = 'Вы пока ничего не добавили'
+          }
+
+          sendHTML(chatId, html, 'home')
+        }).catch(e => console.log(e))
+      } else {
+        sendHTML(chatId, 'Вы пока ничего не добавили', 'home')
+      }
+
+    }).catch(e => console.log(e))
+}
+
+function sendCinemasByQuery(userId, query) {
+  Cinema.find(query).then(cinemas => {
+
+    const html = cinemas.map((c, i) => {
+      return `<b>${i + 1}</b> ${c.name} - /c${c.uuid}`
+    }).join('\n')
+
+    sendHTML(userId, html, 'home')
   })
 
 }
