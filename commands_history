@@ -1,0 +1,4 @@
+npm init
+npm i node-telegram-bot-api --save
+npm i nodemon --save-dev
+npm run dev
