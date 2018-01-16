@@ -19,21 +19,37 @@ mongoose.connect(config.DB_URL, {
 
 require('./models/film.model')
 require('./models/cinema.model')
-
+require('./models/user.model')
 
 const Film = mongoose.model('films')
 const Cinema = mongoose.model('cinemas')
+const User = mongoose.model('users')
 
 // -- Uncomment following line to transfer database.json to mongodb
 // database.films.forEach(f => new Film(f).save().catch(e => console.log(e)))
 // database.cinemas.forEach(c => new Cinema(c).save().catch(e => console.log(e)))
 
+// -- Uncomment following line to transfer database.json to mongodb
+const ACTION_TYPE = {
+  TOGGLE_FAV_FILM: 'tff',
+  SHOW_CINEMAS: 'sc',
+  SHOW_CINEMAS_MAP: 'scm',
+  SHOW_FILMS: 'sf'
+}
 
+// =============================================
+// *********************************************
+//             BOT START
+// *********************************************
 // =============================================
 
 const bot = new TelegramBot(config.TOKEN, {
   polling: true
 })
+
+// ===============================
+// MAIN BOT LISTENER
+// ===============================
 
 bot.on('message', msg => {
   console.log('Working', msg.from.first_name)
@@ -77,6 +93,35 @@ bot.on('message', msg => {
   }
 })
 
+bot.on('callback_query', query => {
+
+  console.log(query.data)
+  
+  let data
+  try {
+    data = JSON.parse(query.data)
+  } catch (e) {
+    throw new Error('Data is not an object')
+  }
+
+  const { type } = data
+
+  if (type === ACTION_TYPE.SHOW_CINEMAS_MAP) {
+
+  } else if (type === ACTION_TYPE.SHOW_CINEMAS) {
+
+  } else if (type === ACTION_TYPE.TOGGLE_FAV_FILM) {
+
+  } else if (type === ACTION_TYPE.SHOW_FILMS) {
+
+  }
+})
+
+
+// ===============================
+// PARSE USER INPUT METHODS
+// ===============================
+
 bot.onText(/\/start/, msg => {
 
   const text = `Здравствуйте, ${msg.from.first_name}\nВыберите команду для начала работы:`
@@ -105,11 +150,17 @@ bot.onText(/\/f(.+)/, (msg, [source, match]) => {
           [
             {
               text: 'Добавить в избранное',
-              callback_data: film.uuid
+              callback_data: JSON.stringify({
+                type: ACTION_TYPE.TOGGLE_FAV_FILM,
+                filmUuid: film.uuid
+              })
             },
             {
               text: 'Показать кинотеатры',
-              callback_data: film.uuid
+              callback_data: JSON.stringify({
+                type: ACTION_TYPE.SHOW_CINEMAS,
+                cinemaUuids: film.cinemas
+              })
             }
           ],
           [
@@ -125,7 +176,49 @@ bot.onText(/\/f(.+)/, (msg, [source, match]) => {
   })
 })
 
+bot.onText(/\/c(.+)/, (msg, [source, match]) => {
+  const cinemaUuid = helper.getItemUuid(source)
+  const chatId = helper.getChatId(msg)
 
+  Cinema.findOne({uuid: cinemaUuid}).then(cinema => {
+
+    // console.log(cinema)
+
+    bot.sendMessage(chatId, `Кинотеатр ${cinema.name}`, {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            {
+              text: cinema.name,
+              url: cinema.url
+            },
+            {
+              text: 'Показать на карте',
+              callback_data: JSON.stringify({
+                type: ACTION_TYPE.SHOW_CINEMAS_MAP,
+                lat: cinema.location.latitude,
+                lon: cinema.location.longitude
+              })
+            }
+          ],
+          [
+            {
+              text: 'Показать фильмы',
+              callback_data: JSON.stringify({
+                type: ACTION_TYPE.SHOW_FILMS,
+                filmUuids: cinema.films
+              })
+            }
+          ]
+        ]
+      }
+    })
+  })
+})
+
+
+// ===============================
+// HELPER METHODS
 // ===============================
 
 function sendFilmsByQuery(chatId, query) {
